@@ -12,8 +12,8 @@ import httpx
 
 from .config import Settings
 
-DEFAULT_USER_AGENT = "osintkit/0.1 (authorized security research; contact: you@example.com)"
-logger = logging.getLogger("osintkit.http")
+DEFAULT_USER_AGENT = "coniugata/0.1 (authorized security research; contact: you@example.com)"
+logger = logging.getLogger("coniugata.http")
 
 
 def _wrap_cache(
@@ -27,7 +27,7 @@ def _wrap_cache(
         logger.debug("hishel not installed; response caching disabled")
         return transport
 
-    cache_dir = Path(settings.cache_dir if settings else ".cache/osintkit")
+    cache_dir = Path(settings.cache_dir if settings else ".cache/coniugata")
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_dir.chmod(0o700)

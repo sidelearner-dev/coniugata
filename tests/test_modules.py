@@ -6,13 +6,13 @@ import logging
 
 import httpx
 
-from osintkit.config import Settings
-from osintkit.engine import Context
-from osintkit.models import Entity, EntityType
-from osintkit.modules.crtsh import CrtSh
-from osintkit.modules.rdap import Rdap
-from osintkit.modules.shodan import Shodan
-from osintkit.modules.urlscan import Urlscan
+from coniugata.config import Settings
+from coniugata.engine import Context
+from coniugata.models import Entity, EntityType
+from coniugata.modules.crtsh import CrtSh
+from coniugata.modules.rdap import Rdap
+from coniugata.modules.shodan import Shodan
+from coniugata.modules.urlscan import Urlscan
 
 
 def make_ctx(handler, settings: Settings | None = None) -> Context:

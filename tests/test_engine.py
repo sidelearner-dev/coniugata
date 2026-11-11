@@ -6,10 +6,10 @@ import logging
 
 import httpx
 
-from osintkit.config import Settings
-from osintkit.engine import Context, build_seeds, detect_type, run_scan
-from osintkit.models import Entity, EntityType
-from osintkit.registry import Module
+from coniugata.config import Settings
+from coniugata.engine import Context, build_seeds, detect_type, run_scan
+from coniugata.models import Entity, EntityType
+from coniugata.registry import Module
 
 
 def test_detect_type():

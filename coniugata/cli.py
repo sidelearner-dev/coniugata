@@ -27,7 +27,7 @@ PROFILES: dict[str, set[str] | None] = {
 
 
 def _load_modules() -> dict[str, type]:
-    import osintkit.modules  # noqa: F401  (importing registers every source)
+    import coniugata.modules  # noqa: F401  (importing registers every source)
 
     return REGISTRY
 
@@ -54,7 +54,7 @@ def _select(spec: str, profile: str | None, settings: Settings) -> list:
     for name in sorted(names or set()):
         cls = registry[name]
         if cls.requires_key and cls.key_attr and not getattr(settings, cls.key_attr, None):
-            console.print(f"[yellow]skip[/yellow] {name}: set OSINT_{cls.key_attr.upper()}")
+            console.print(f"[yellow]skip[/yellow] {name}: set CONIUGATA_{cls.key_attr.upper()}")
             continue
         selected.append(cls())
     return selected
@@ -105,7 +105,7 @@ def scan(
             ctx = Context(
                 http=client,
                 settings=settings,
-                log=logging.getLogger("osintkit"),
+                log=logging.getLogger("coniugata"),
                 concurrency=concurrency,
             )
             return await run_scan(seeds, selected, ctx, max_depth=depth)

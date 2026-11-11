@@ -5,8 +5,8 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from osintkit.config import Settings
-from osintkit.http import make_client
+from coniugata.config import Settings
+from coniugata.http import make_client
 
 pytest.importorskip("hishel")
 pytest.importorskip("anysqlite")

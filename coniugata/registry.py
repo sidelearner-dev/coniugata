@@ -20,7 +20,7 @@ class Module:
     """Base class for a source.
 
     Subclasses implement ``async def run(self, entity, ctx)`` as an async
-    generator that yields :class:`~osintkit.models.Entity` objects.
+    generator that yields :class:`~coniugata.models.Entity` objects.
     """
 
     name: str = ""
