@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,14 +16,14 @@ class Settings(BaseSettings):
     vt_key: str | None = None
 
     # Runtime knobs
-    request_timeout: float = 20.0
-    concurrency: int = 10
+    request_timeout: float = Field(20.0, gt=0, le=600)
+    concurrency: int = Field(10, ge=1, le=100)
     cache_dir: str = ".cache/coniugata"
-    cache_ttl: int = 3600
+    cache_ttl: int = Field(3600, ge=0)
     user_agent: str | None = None
 
     # theHarvester subprocess wrapper
     theharvester_bin: str = "theHarvester"
     theharvester_sources: str = "crtsh,otx,hackertarget,rapiddns"
-    theharvester_limit: int = 500
-    theharvester_timeout: float = 180.0
+    theharvester_limit: int = Field(500, ge=1, le=5000)
+    theharvester_timeout: float = Field(180.0, gt=0, le=3600)

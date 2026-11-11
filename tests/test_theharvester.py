@@ -66,6 +66,8 @@ with open(base + ".json", "w", encoding="utf-8") as handle:
                 "lookalike.test:198.51.100.9",
                 "www.example.com:not-an-ip",
                 "db.example.com:2001:db8::10",
+                "198.51.100.44",
+                "2001:db8::99",
             ],
             "emails": ["Ops@Example.com", "sales@example.com"],
         },
@@ -96,7 +98,13 @@ print("* cmartorella@edge-security.com *")
     emails = {item.value for item in found if item.type is EntityType.EMAIL}
 
     assert subdomains == {"api.example.com", "www.example.com", "db.example.com"}
-    assert ips == {"203.0.113.5", "203.0.113.6", "2001:db8::10"}
+    assert ips == {
+        "203.0.113.5",
+        "203.0.113.6",
+        "2001:db8::10",
+        "198.51.100.44",
+        "2001:db8::99",
+    }
     assert emails == {"ops@example.com", "sales@example.com", "ceo@example.com"}
     assert "cmartorella@edge-security.com" not in emails
     assert all(item.source == "theharvester" for item in found)

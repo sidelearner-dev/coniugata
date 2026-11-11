@@ -5,6 +5,7 @@ from __future__ import annotations
 from ..http import fetch_json
 from ..models import Entity, EntityType
 from ..registry import Module, register
+from ..validators import is_valid_hostname
 
 
 def _first_text(entry: dict) -> str | None:
@@ -30,30 +31,45 @@ class Rdap(Module):
     description = "RDAP registration data: nameservers and registrant org"
 
     async def run(self, entity, ctx):
-        data = await fetch_json(
-            ctx, f"https://rdap.org/domain/{entity.value}", bucket=ctx.bucket(self)
-        )
+        domain = entity.value.strip().lower().rstrip(".")
+        if not is_valid_hostname(domain):
+            raise ValueError(f"invalid domain for RDAP: {entity.value!r}")
 
-        for server in data.get("nameservers") or []:
-            name = str(server.get("ldhName", "")).lower().rstrip(".")
-            if name:
+        data = await fetch_json(
+            ctx, f"https://rdap.org/domain/{domain}", bucket=ctx.bucket(self)
+        )
+        if not isinstance(data, dict):
+            return
+
+        servers = data.get("nameservers")
+        if isinstance(servers, list):
+            for server in servers:
+                if not isinstance(server, dict):
+                    continue
+                name = str(server.get("ldhName", "")).lower().rstrip(".")
+                if not name or not is_valid_hostname(name):
+                    continue
                 yield Entity(
                     type=EntityType.DOMAIN,
                     value=name,
                     source=self.name,
-                    parent=entity.value,
+                    parent=domain,
                     confidence=0.9,
                     raw={"role": "nameserver"},
                 )
 
-        for entry in data.get("entities") or []:
-            org = _first_text(entry)
-            if org:
-                yield Entity(
-                    type=EntityType.ORG,
-                    value=org,
-                    source=self.name,
-                    parent=entity.value,
-                    confidence=0.6,
-                    raw={"roles": entry.get("roles", [])},
-                )
+        entities = data.get("entities")
+        if isinstance(entities, list):
+            for entry in entities:
+                if not isinstance(entry, dict):
+                    continue
+                org = _first_text(entry)
+                if org:
+                    yield Entity(
+                        type=EntityType.ORG,
+                        value=org,
+                        source=self.name,
+                        parent=domain,
+                        confidence=0.6,
+                        raw={"roles": entry.get("roles", [])},
+                    )

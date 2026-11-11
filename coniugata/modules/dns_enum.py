@@ -8,6 +8,7 @@ import dns.resolver
 
 from ..models import Entity, EntityType
 from ..registry import Module, register
+from ..validators import is_valid_hostname
 
 _RECORD_TYPES = ("A", "AAAA", "MX", "NS", "CNAME")
 
@@ -35,12 +36,16 @@ class DnsEnum(Module):
     description = "DNS lookups: A, AAAA, MX, NS, CNAME"
 
     async def run(self, entity, ctx):
+        domain = entity.value.strip().lower().rstrip(".")
+        if not is_valid_hostname(domain):
+            raise ValueError(f"invalid domain for DNS: {entity.value!r}")
+
         resolver = dns.asyncresolver.Resolver()
         resolver.lifetime = ctx.settings.request_timeout
         for rdtype in _RECORD_TYPES:
             try:
                 answer = await resolver.resolve(
-                    entity.value, rdtype, raise_on_no_answer=False
+                    domain, rdtype, raise_on_no_answer=False
                 )
             except (dns.resolver.NXDOMAIN, dns.resolver.NoNameservers, dns.exception.Timeout):
                 continue

@@ -28,10 +28,18 @@ def _wrap_cache(
         return transport
 
     cache_dir = Path(settings.cache_dir if settings else ".cache/coniugata")
+    # A symlinked cache path could redirect writes (or the SQLite file) to a
+    # location an attacker controls. Refuse rather than follow it.
+    if cache_dir.is_symlink():
+        logger.warning("refusing symlinked cache directory: %s", cache_dir)
+        return transport
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_dir.chmod(0o700)
         db_path = cache_dir / "http.db"
+        if db_path.is_symlink():
+            logger.warning("refusing symlinked cache database: %s", db_path)
+            return transport
         db_path.touch(mode=0o600, exist_ok=True)
         db_path.chmod(0o600)
         storage = AsyncSqliteStorage(
@@ -99,18 +107,28 @@ async def fetch_json(
     params: dict | None = None,
     headers: dict | None = None,
     bucket: TokenBucket | None = None,
+    follow_redirects: bool | None = None,
 ) -> Any:
-    """GET a URL as JSON, honouring Retry-After and transient 5xx errors."""
+    """GET a URL as JSON, honouring Retry-After and transient 5xx errors.
+
+    Pass ``follow_redirects=False`` for requests carrying credentials: httpx
+    forwards custom headers (and query parameters) across hosts on redirects.
+    """
     last_error: Exception | None = None
     for attempt in range(4):
         if bucket is not None:
             await bucket.acquire()
         try:
-            response = await ctx.http.get(url, params=params, headers=headers)
+            response = await ctx.http.get(
+                url, params=params, headers=headers, follow_redirects=follow_redirects
+            )
         except httpx.HTTPError as exc:
             last_error = exc
             await asyncio.sleep(2**attempt)
             continue
+
+        if follow_redirects is False and response.is_redirect:
+            raise RuntimeError(f"unexpected redirect from {response.url.host}")
 
         if response.status_code == 429:
             try:
@@ -126,4 +144,6 @@ async def fetch_json(
         response.raise_for_status()
         return response.json()
 
-    raise RuntimeError(f"request failed after retries: {url} ({last_error})")
+    # Exception text can contain the full URL (and therefore credentials).
+    reason = type(last_error).__name__ if last_error else "no response"
+    raise RuntimeError(f"request failed after retries: {url} ({reason})")

@@ -139,7 +139,30 @@ and any profile automatically.
 pytest
 ```
 
-Tests use `httpx.MockTransport`, so they never touch the network.
+Tests use `httpx.MockTransport` and fake subprocesses, so they never touch the
+network. `tests/test_security.py` covers injection attempts, malformed upstream
+payloads, report sanitisation and cache permissions.
+
+Run the security scanners too:
+
+```bash
+ruff check . && ruff check --select S coniugata
+bandit -q -r coniugata
+pip-audit
+```
+
+## Security notes
+
+- Domain, email and IP values are validated before they reach a URL, DNS query
+  or subprocess argument; external commands are invoked without a shell.
+- Keyed requests do not follow redirects, and error messages never include API
+  keys (Shodan passes its key in the query string).
+- Reports neutralise CSV formula injection, Markdown/HTML injection and terminal
+  escape sequences, since all values come from untrusted third parties.
+- The HTTP cache directory is `0700`, the database `0600`, and symlinked cache
+  paths are refused.
+- theHarvester runs with a timeout, in its own process group, and its report
+  files are size-capped before parsing.
 
 ## Legal / ethical use
 
