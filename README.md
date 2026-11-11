@@ -54,10 +54,20 @@ The first run writes `results.json` and prints a summary table.
 | `dns` | domain | ip, domain | no |
 | `urlscan` | domain | url, ip, asn, org | optional (`CONIUGATA_URLSCAN_KEY`) |
 | `shodan` | ip | org, asn, domain | yes (`CONIUGATA_SHODAN_KEY`) |
+| `theharvester` | domain | subdomain, email, ip | no (local binary) |
 | `hibp` | email | breach | yes (`CONIUGATA_HIBP_KEY`) |
 
 Keyed modules are automatically skipped (with a notice) when their key is absent.
 `urlscan` works anonymously; a key only raises its rate limit.
+
+`theharvester` shells out to the [theHarvester](https://github.com/laramies/theHarvester)
+binary installed on your system, so it adds no Python dependency. It supplies the
+`email` entities that `hibp` consumes, letting a depth-2 recon scan feed breach
+lookups automatically:
+
+```bash
+coniugata scan example.com --modules theharvester -d 2 -o recon.json
+```
 
 ## Configuration
 
@@ -70,9 +80,13 @@ CONIUGATA_URLSCAN_KEY=...
 CONIUGATA_REQUEST_TIMEOUT=20
 CONIUGATA_CONCURRENCY=10
 CONIUGATA_CACHE_TTL=3600
+CONIUGATA_THEHARVESTER_BIN=theHarvester
+CONIUGATA_THEHARVESTER_SOURCES=crtsh,otx,hackertarget,rapiddns
+CONIUGATA_THEHARVESTER_LIMIT=500
+CONIUGATA_THEHARVESTER_TIMEOUT=180
 ```
 
-Every field maps to an `CONIUGATA_`-prefixed env var.
+Every field maps to a `CONIUGATA_`-prefixed env var.
 
 ## Caching
 

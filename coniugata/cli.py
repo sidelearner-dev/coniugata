@@ -20,7 +20,7 @@ console = Console()
 
 # Named bundles of modules. `None` means "everything in the registry".
 PROFILES: dict[str, set[str] | None] = {
-    "recon": {"crtsh", "rdap", "dns", "urlscan", "shodan"},
+    "recon": {"crtsh", "rdap", "dns", "urlscan", "shodan", "theharvester"},
     "breach": {"hibp"},
     "all": None,
 }

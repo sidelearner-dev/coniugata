@@ -2,20 +2,10 @@
 
 from __future__ import annotations
 
-import re
-
 from ..http import fetch_json
 from ..models import Entity, EntityType
 from ..registry import Module, register
-
-_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
-
-
-def _valid_hostname(name: str) -> bool:
-    if len(name) > 253 or any(ch in name for ch in " @/"):
-        return False
-    labels = name.rstrip(".").split(".")
-    return len(labels) >= 2 and all(_LABEL.match(label) for label in labels)
+from ..validators import is_valid_hostname
 
 
 @register
@@ -39,7 +29,7 @@ class CrtSh(Module):
                 name = raw_name.strip().lower().lstrip("*.").rstrip(".")
                 # Keep only real subdomains of the target: no issuer CNs, emails,
                 # and no lookalikes such as "testexample.com" for "example.com".
-                if not _valid_hostname(name):
+                if not is_valid_hostname(name):
                     continue
                 if name == entity.value or not name.endswith("." + entity.value):
                     continue

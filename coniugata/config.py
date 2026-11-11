@@ -20,3 +20,9 @@ class Settings(BaseSettings):
     cache_dir: str = ".cache/coniugata"
     cache_ttl: int = 3600
     user_agent: str | None = None
+
+    # theHarvester subprocess wrapper
+    theharvester_bin: str = "theHarvester"
+    theharvester_sources: str = "crtsh,otx,hackertarget,rapiddns"
+    theharvester_limit: int = 500
+    theharvester_timeout: float = 180.0
