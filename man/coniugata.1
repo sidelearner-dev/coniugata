@@ -1,0 +1,165 @@
+.TH CONIUGATA 1 "2026-11-11" "coniugata 0.1.0" "User Commands"
+.SH NAME
+.PP
+coniugata \- modular OSINT aggregation engine
+.SH SYNOPSIS
+.nf
+coniugata [\-\-version] [\-\-help] COMMAND [ARGS]...
+
+coniugata scan TARGET [OPTIONS]
+
+coniugata modules
+
+coniugata manual [SECTION] [\-\-roff]
+.fi
+.SH DESCRIPTION
+.PP
+coniugata collects open\-source intelligence about a domain, IP address, or email address. Sources are plugins: each accepts one or more entity types and yields new typed entities, which the engine feeds back in for further rounds of expansion. Every finding records its source and the entity it was derived from, so a report can be audited.
+.PP
+The target type is detected automatically. URLs are reduced to their hostname, email addresses are lower\-cased, and domains have a trailing dot and a leading '*.' removed.
+.PP
+Sources that need an API key are skipped, with a notice, when the key is not configured. urlscan also works anonymously; a key only raises its rate limit.
+.SH COMMANDS
+.PP
+scan TARGET \- run a scan against a domain, IP address, or email.
+.PP
+modules \- list registered sources and what they accept and produce.
+.PP
+manual [SECTION] \- show this manual. Add \-\-roff to emit a roff man page.
+.PP
+Run 'coniugata COMMAND \-\-help' for a summary of a command's options.
+.SH SCAN OPTIONS
+.PP
+TARGET \- domain, IP address, or email to investigate. Required.
+.PP
+\-m, \-\-modules LIST \- comma\-separated source names (see SOURCES), or 'all' (the default). Ignored when \-\-profile is set.
+.PP
+\-p, \-\-profile NAME \- curated bundle: recon, breach, or all. Overrides \-\-modules.
+.PP
+\-d, \-\-depth N \- rounds of graph expansion, from 1 to 5 (default 2). Depth 1 scans only the target.
+.PP
+\-o, \-\-out PATH \- report path. The format is inferred from the extension: .json (default results.json), .csv, or .md. Existing files are overwritten.
+.PP
+\-c, \-\-concurrency N \- maximum source tasks in flight at once (default 10).
+.PP
+\-\-cache / \-\-no\-cache \- cache HTTP responses on disk (default: cache).
+.PP
+\-v, \-\-verbose \- debug logging, including per\-depth progress.
+.PP
+\-V, \-\-version \- print the version and exit.
+.PP
+\-\-help \- show summary help and exit.
+.SH PROFILES
+.PP
+recon \- crtsh, rdap, dns, urlscan, shodan and theharvester. Keyed sources in the bundle are skipped when their keys are missing.
+.PP
+breach \- hibp only; it consumes email entities discovered earlier in the scan.
+.PP
+all \- every registered source. This is also the default when neither \-\-profile nor \-\-modules is given.
+.SH EXPANSION
+.PP
+Runs are breadth\-first. Round 1 runs every selected source that accepts the target type. Entities returned by a source become the frontier for round 2, and so on up to \-\-depth.
+.PP
+Duplicate entities are reported once, with all sources and parents merged, but only newly seen entities are expanded. This keeps a scan from looping while preserving multi\-source provenance.
+.PP
+Depth 2 or higher can multiply API calls quickly. Start at depth 1 or 2 on an unfamiliar target.
+.SH SOURCES
+.nf
+crtsh: accepts domain; produces subdomain; API key not needed.
+Certificate transparency (crt.sh) subdomain discovery
+.fi
+.nf
+dns: accepts domain; produces domain, ip; API key not needed.
+DNS lookups: A, AAAA, MX, NS, CNAME
+.fi
+.nf
+hibp: accepts email; produces breach; API key required.
+HaveIBeenPwned breach exposure (email, API key required)
+.fi
+.nf
+rdap: accepts domain; produces domain, org; API key not needed.
+RDAP registration data: nameservers and registrant org
+.fi
+.nf
+shodan: accepts ip; produces asn, domain, org; API key required.
+Shodan host lookups: org, ASN, hostnames (IP, API key required)
+.fi
+.nf
+theharvester: accepts domain; produces email, ip, subdomain; API key not needed.
+theHarvester subdomains, emails and IPs (requires local binary)
+.fi
+.nf
+urlscan: accepts domain; produces asn, ip, org, url; API key optional.
+urlscan.io search: recent scans, URLs, IPs, ASNs (optional API key)
+.fi
+.SH CONFIGURATION
+.PP
+Settings are read from a .env file in the current working directory, then from the environment. Every setting uses the CONIUGATA_ prefix. See .env.example for the complete list.
+.PP
+CONIUGATA_SHODAN_KEY \- Shodan API key. Required by shodan.
+.PP
+CONIUGATA_HIBP_KEY \- HaveIBeenPwned API key. Required by hibp.
+.PP
+CONIUGATA_URLSCAN_KEY \- optional urlscan.io key; raises the anonymous rate limit.
+.PP
+CONIUGATA_VT_KEY \- reserved for a VirusTotal source; currently unused.
+.PP
+CONIUGATA_REQUEST_TIMEOUT \- HTTP timeout in seconds (default 20).
+.PP
+CONIUGATA_CACHE_DIR \- cache directory (default .cache/coniugata).
+.PP
+CONIUGATA_CACHE_TTL \- cache lifetime in seconds (default 3600).
+.PP
+CONIUGATA_USER_AGENT \- override the default User\-Agent.
+.PP
+CONIUGATA_THEHARVESTER_BIN \- theHarvester executable (default theHarvester).
+.PP
+CONIUGATA_THEHARVESTER_SOURCES \- comma\-separated theHarvester sources (default crtsh,otx,hackertarget,rapiddns).
+.PP
+CONIUGATA_THEHARVESTER_LIMIT \- result limit (default 500).
+.PP
+CONIUGATA_THEHARVESTER_TIMEOUT \- subprocess timeout in seconds (default 180).
+.PP
+Scan concurrency is controlled by \-\-concurrency, not by an environment variable.
+.SH FILES
+.PP
+\&.env \- local configuration and API keys. Never commit it.
+.PP
+results.json \- default report path, or whatever is passed to \-\-out.
+.PP
+\&.cache/coniugata/http.db \- HTTP response cache, created with mode 0600. Some providers (notably Shodan) put API keys in query strings, so cached URLs can contain secrets. Treat the cache as sensitive.
+.SH EXAMPLES
+.nf
+# Default scan: all sources, depth 2, JSON report
+coniugata scan example.com
+
+# Recon bundle with three expansion rounds, Markdown report
+coniugata scan example.com \-\-profile recon \-\-depth 3 \-o recon.md
+
+# Discover emails, then check them against HIBP
+coniugata scan example.com \-m theharvester,hibp \-d 3
+
+# Single\-IP enrichment with Shodan
+coniugata scan 203.0.113.7 \-m shodan \-o host.json
+
+# Only certificate\-transparency and DNS sources, one round
+coniugata scan example.com \-m crtsh,dns \-\-depth 1
+
+# Show one manual section
+coniugata manual configuration
+.fi
+.SH EXIT STATUS
+.PP
+0 \- success.
+.PP
+1 \- no runnable sources were selected, for example because every selected source needs a missing API key.
+.PP
+2 \- invalid arguments or a usage error.
+.SH SECURITY AND ETHICS
+.PP
+Only scan assets you own or have explicit written authorisation to test. Respect provider terms of service and rate limits, handle personal data in line with applicable law (for example GDPR), never store plaintext credentials, and keep an audit trail of what you scanned and why.
+.PP
+Reports neutralise CSV formula injection, Markdown/HTML injection and terminal escape sequences, because all values come from untrusted third parties.
+.SH SEE ALSO
+.PP
+coniugata modules, coniugata scan \-\-help, the project README, and .env.example.

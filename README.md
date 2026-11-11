@@ -29,6 +29,11 @@ pip install -e ".[dev,cache]"
 coniugata modules                       # list sources
 coniugata scan example.com --profile recon
 coniugata scan example.com --depth 2 -o report.md
+
+coniugata --help                        # short overview
+coniugata scan --help                   # summary of scan options
+coniugata manual                        # full manual
+coniugata manual scan                   # one section of the manual
 ```
 
 The first run writes `results.json` and prints a summary table.
@@ -39,11 +44,39 @@ The first run writes `results.json` and prints a summary table.
 |---|---|
 | `coniugata modules` | List every registered source and what it accepts/produces |
 | `coniugata scan <target>` | Run a scan against a domain, IP, or email |
+| `coniugata manual [section]` | Full manual; `--roff` emits a man page |
 | `--profile recon\|breach\|all` | Named module bundles |
 | `--modules crtsh,dns` | Pick modules explicitly |
 | `--depth N` | How many rounds of expansion (1–5) |
 | `--out report.csv` | Report format chosen by extension (`.json`/`.csv`/`.md`) |
 | `--cache / --no-cache` | Cache HTTP responses in `.cache/coniugata/http.db` |
+| `--version` | Print the installed version and exit |
+
+## Manual and man page
+
+`--help` stays deliberately short. `coniugata manual` prints the long-form
+reference: description, commands, every scan option, profiles, expansion rules,
+the source list, configuration, files, examples, exit status and security notes.
+Filter it by section name:
+
+```bash
+coniugata manual scan
+coniugata manual configuration
+```
+
+The same content is available as a roff man page. A generated copy lives at
+`man/coniugata.1`; install it into your user manpath with:
+
+```bash
+install -Dm644 man/coniugata.1 ~/.local/share/man/man1/coniugata.1
+man coniugata
+```
+
+Regenerate it whenever the manual changes:
+
+```bash
+coniugata manual --roff > man/coniugata.1
+```
 
 ## Bundled modules
 

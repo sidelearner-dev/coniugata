@@ -20,6 +20,7 @@ class Urlscan(Module):
     produces = frozenset(
         {EntityType.URL, EntityType.IP, EntityType.ASN, EntityType.ORG}
     )
+    key_attr = "urlscan_key"
     # Search works anonymously; an API key just raises the rate limit.
     rate_limit = 1.0
     description = "urlscan.io search: recent scans, URLs, IPs, ASNs (optional API key)"
