@@ -211,3 +211,5 @@ audit trail of what you scanned and why.
 ## License
 
 Released under the [MIT License](LICENSE).
+
+Maintained by [@sidelearner-dev](https://github.com/sidelearner-dev).
