@@ -55,6 +55,10 @@ def sections() -> list[tuple[str, list[str]]]:
                 "\n"
                 "coniugata modules\n"
                 "\n"
+                "coniugata history [--limit N]\n"
+                "\n"
+                "coniugata show ID\n"
+                "\n"
                 "coniugata manual [SECTION] [--roff]")
             ],
         ),
@@ -79,6 +83,8 @@ def sections() -> list[tuple[str, list[str]]]:
             [
                 "scan TARGET - run a scan against a domain, IP address, or email.",
                 "modules - list registered sources and what they accept and produce.",
+                "history - list scans recorded in the local history database.",
+                "show ID - show the findings recorded for one scan.",
                 "manual [SECTION] - show this manual. Add --roff to emit a roff man page.",
                 "Run 'coniugata COMMAND --help' for a summary of a command's options.",
             ],
@@ -97,6 +103,9 @@ def sections() -> list[tuple[str, list[str]]]:
                 ".json (default results.json), .csv, or .md. Existing files are overwritten."),
                 "-c, --concurrency N - maximum source tasks in flight at once (default 10).",
                 "--cache / --no-cache - cache HTTP responses on disk (default: cache).",
+                ("--db / --no-db - record the scan and its findings in the local history "
+                "database (default: record)."),
+                "--db-path PATH - override the local history database path for this run.",
                 "-v, --verbose - debug logging, including per-depth progress.",
                 "-V, --version - print the version and exit.",
                 "--help - show summary help and exit.",
@@ -132,7 +141,11 @@ def sections() -> list[tuple[str, list[str]]]:
             [
                 ("Settings are read from a .env file in the current working directory, then "
                 "from the environment. Every setting uses the CONIUGATA_ prefix. See "
-                ".env.example for the complete list."),
+                ".env.example for the complete list. A .env that is a symlink, not owned by "
+                "you, or writable by group/others is ignored so an untrusted repository "
+                "cannot redirect theHarvester or the database. A .env readable by "
+                "group/others is loaded with a warning, since it exposes API keys; run "
+                "chmod 600 .env to fix it. Override the path with CONIUGATA_ENV_FILE."),
                 "CONIUGATA_SHODAN_KEY - Shodan API key. Required by shodan.",
                 "CONIUGATA_HIBP_KEY - HaveIBeenPwned API key. Required by hibp.",
                 ("CONIUGATA_URLSCAN_KEY - optional urlscan.io key; raises the anonymous rate "
@@ -142,6 +155,16 @@ def sections() -> list[tuple[str, list[str]]]:
                 "CONIUGATA_CACHE_DIR - cache directory (default .cache/coniugata).",
                 "CONIUGATA_CACHE_TTL - cache lifetime in seconds (default 3600).",
                 "CONIUGATA_USER_AGENT - override the default User-Agent.",
+                ("CONIUGATA_IDENTITY_MODE - install (persist one token), run (fresh "
+                "token each run) or none (no fingerprint). Default: install."),
+                ("CONIUGATA_INSTANCE_TOKEN - override the anonymous per-install token. "
+                "Normally generated on first run and stored under the config directory."),
+                ("CONIUGATA_MAX_RESPONSE_BYTES - refuse HTTP bodies larger than this many "
+                "decompressed bytes (default 16777216)."),
+                ("CONIUGATA_MAX_ENTITIES - stop expanding after this many findings per scan; "
+                "0 disables the cap (default 50000)."),
+                ("CONIUGATA_DB_PATH - local history database path (default "
+                "~/.local/share/coniugata/coniugata.db)."),
                 "CONIUGATA_THEHARVESTER_BIN - theHarvester executable (default theHarvester).",
                 ("CONIUGATA_THEHARVESTER_SOURCES - comma-separated theHarvester sources "
                 "(default crtsh,otx,hackertarget,rapiddns)."),
@@ -152,13 +175,41 @@ def sections() -> list[tuple[str, list[str]]]:
             ],
         ),
         (
+            "IDENTITY AND PRIVACY",
+            [
+                ("coniugata ships no author contact details, API keys or shared identifiers. "
+                "By default it generates a random 128-bit token in "
+                "~/.config/coniugata/instance.json (mode 0600) and puts only a truncated "
+                "SHA-256 fingerprint of that token in the User-Agent. Two installs therefore "
+                "look different to providers, while neither the token nor the author can be "
+                "recovered from the header."),
+                ("CONIUGATA_IDENTITY_MODE selects the behaviour: install keeps one token per "
+                "install, run generates a fresh token for every run and writes nothing, and "
+                "none sends no fingerprint at all. An explicit CONIUGATA_INSTANCE_TOKEN "
+                "overrides all three."),
+                ("Set CONIUGATA_USER_AGENT to send a different header, or "
+                "CONIUGATA_INSTANCE_TOKEN to reuse a token across machines. Neither the token "
+                "nor the fingerprint is a secret, but keep the identity file private: anyone "
+                "who can read it can impersonate your install."),
+                ("No telemetry is sent anywhere. Scans are stored only in the local history "
+                "database, and the HTTP cache stays in the cache directory you configure."),
+            ],
+        ),
+        (
             "FILES",
             [
                 ".env - local configuration and API keys. Never commit it.",
                 "results.json - default report path, or whatever is passed to --out.",
+                ("Report files are created with mode 0600 and symlinked report paths are "
+                "refused, because they can contain personal data."),
                 (".cache/coniugata/http.db - HTTP response cache, created with mode 0600. "
                 "Some providers (notably Shodan) put API keys in query strings, so cached "
                 "URLs can contain secrets. Treat the cache as sensitive."),
+                ("~/.config/coniugata/instance.json - anonymous per-install token, created "
+                "with mode 0600 on first use. Only a truncated hash is sent in the "
+                "User-Agent."),
+                ("~/.local/share/coniugata/coniugata.db - local scan history, created with "
+                "mode 0600. Disable per run with --no-db."),
             ],
         ),
         (

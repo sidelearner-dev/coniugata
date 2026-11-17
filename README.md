@@ -16,6 +16,8 @@ coniugata/
 │   ├── models.py     # Entity / EntityType
 │   ├── registry.py   # @register plugin registry
 │   ├── http.py       # shared httpx client + token-bucket throttling
+│   ├── identity.py   # anonymous per-install token and User-Agent
+│   ├── db.py         # local scan-history database (SQLite)
 │   ├── engine.py     # async BFS orchestrator
 │   ├── report.py     # JSON / CSV / Markdown output
 │   └── modules/      # one file per source
@@ -48,12 +50,15 @@ The first run writes `results.json` and prints a summary table.
 |---|---|
 | `coniugata modules` | List every registered source and what it accepts/produces |
 | `coniugata scan <target>` | Run a scan against a domain, IP, or email |
+| `coniugata history` | List scans recorded in the local history database |
+| `coniugata show <id>` | Show the findings recorded for one scan |
 | `coniugata manual [section]` | Full manual; `--roff` emits a man page |
 | `--profile recon\|breach\|all` | Named module bundles |
 | `--modules crtsh,dns` | Pick modules explicitly |
 | `--depth N` | How many rounds of expansion (1–5) |
 | `--out report.csv` | Report format chosen by extension (`.json`/`.csv`/`.md`) |
 | `--cache / --no-cache` | Cache HTTP responses in `.cache/coniugata/http.db` |
+| `--db / --no-db` | Record the scan in the local history database (default: record) |
 | `--version` | Print the installed version and exit |
 
 ## Manual and man page
@@ -117,6 +122,10 @@ CONIUGATA_URLSCAN_KEY=...
 CONIUGATA_REQUEST_TIMEOUT=20
 CONIUGATA_CONCURRENCY=10
 CONIUGATA_CACHE_TTL=3600
+CONIUGATA_MAX_RESPONSE_BYTES=16777216
+CONIUGATA_MAX_ENTITIES=50000
+CONIUGATA_DB_PATH=
+CONIUGATA_INSTANCE_TOKEN=
 CONIUGATA_THEHARVESTER_BIN=theHarvester
 CONIUGATA_THEHARVESTER_SOURCES=crtsh,otx,hackertarget,rapiddns
 CONIUGATA_THEHARVESTER_LIMIT=500
@@ -124,6 +133,13 @@ CONIUGATA_THEHARVESTER_TIMEOUT=180
 ```
 
 Every field maps to a `CONIUGATA_`-prefixed env var.
+
+`coniugata` reads `.env` from the current directory, so an untrusted repository
+could try to plant one. A `.env` that is a symlink, not owned by you, or
+writable by group/others is ignored; set `CONIUGATA_ENV_FILE` to use a specific
+file instead. A `.env` that is merely readable by group/others is loaded but
+warns, because it can expose your API keys to other local users. Run
+`chmod 600 .env` to silence the warning.
 
 ## Caching
 
@@ -137,6 +153,43 @@ tool still runs, just uncached. The cache directory is created with `0700`
 permissions and is gitignored, but treat it as sensitive: some providers
 (notably Shodan) authenticate via query-string API keys, which appear in cached
 request URLs.
+
+## Local history database
+
+Every scan is recorded in SQLite at `~/.local/share/coniugata/coniugata.db`
+(override with `CONIUGATA_DB_PATH` or `--db-path`). The database is created with
+mode `0600` inside a `0700` directory and holds two tables: one row per scan and
+one row per finding, including its source and parent. Reports are still written
+to the path you pass `--out`; the database is for audit and repeat lookups.
+
+```bash
+coniugata history             # 20 most recent scans
+coniugata history -n 100      # page through more
+coniugata show 3              # findings recorded for scan #3
+coniugata scan example.com --no-db   # skip recording for one run
+```
+
+The database is deliberately separate from the HTTP cache: the cache can contain
+provider API keys in cached URLs, while the history database only contains what
+you scanned and what came back.
+
+## Anonymous install identity
+
+The package ships no author contact details or shared identifier. The default
+`CONIUGATA_IDENTITY_MODE=install` generates a random 128-bit token at
+`~/.config/coniugata/instance.json` (mode `0600`) and sends only a truncated
+SHA-256 fingerprint of it in the User-Agent. Two installs are therefore
+distinguishable to providers, but the header cannot be traced back to the author
+or to the token. No telemetry is sent.
+
+| Mode | Behaviour |
+|---|---|
+| `install` | One persisted token per install; the same fingerprint across runs. Default. |
+| `run` | A fresh random token for each run; nothing is written to disk and runs are not linkable. |
+| `none` | No `instance:` fingerprint at all; only the generic `coniugata/0.1` UA. |
+
+Set `CONIUGATA_USER_AGENT` to send a different header, or
+`CONIUGATA_INSTANCE_TOKEN` to reuse an explicit token across machines.
 
 ## Adding a source
 
@@ -198,6 +251,17 @@ pip-audit
   escape sequences, since all values come from untrusted third parties.
 - The HTTP cache directory is `0700`, the database `0600`, and symlinked cache
   paths are refused.
+- The scan-history database, identity file and report files are `0600`;
+  symlinked paths are refused, and none of them stores API keys.
+- `.env` files that are symlinks, not owned by you, or writable by group/others
+  are ignored, so a planted file cannot point theHarvester at another binary.
+  Group/other-readable files are loaded with a warning recommending
+  `chmod 600 .env`.
+- Responses larger than `CONIUGATA_MAX_RESPONSE_BYTES` (default 16 MiB,
+  decompressed) are refused before parsing, and expansion stops at
+  `CONIUGATA_MAX_ENTITIES` findings per scan (default 50000).
+- Requests carry only a truncated hash of a randomly generated per-install
+  token, never author contact details or the token itself.
 - theHarvester runs with a timeout, in its own process group, and its report
   files are size-capped before parsing.
 

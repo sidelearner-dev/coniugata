@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from pathlib import Path
@@ -11,9 +12,11 @@ from typing import Any
 import httpx
 
 from .config import Settings
+from .identity import user_agent_for
 
-DEFAULT_USER_AGENT = "coniugata/0.1 (authorized security research; contact: you@example.com)"
 logger = logging.getLogger("coniugata.http")
+
+DEFAULT_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 
 
 def _wrap_cache(
@@ -65,13 +68,18 @@ def make_client(
         next_transport = _wrap_cache(next_transport, settings)
 
     timeout = settings.request_timeout if settings else 20.0
-    user_agent = settings.user_agent if settings and settings.user_agent else DEFAULT_USER_AGENT
+    user_agent = settings.user_agent if settings and settings.user_agent else None
+    if not user_agent:
+        mode = settings.identity_mode if settings else "install"
+        token = settings.instance_token if settings else None
+        user_agent = user_agent_for(mode, token)
     return httpx.AsyncClient(
         transport=next_transport,
         timeout=httpx.Timeout(timeout, connect=min(10.0, timeout)),
         limits=httpx.Limits(max_connections=50, max_keepalive_connections=20),
         http2=True,
         follow_redirects=True,
+        max_redirects=5,
         headers={"User-Agent": user_agent},
     )
 
@@ -100,6 +108,20 @@ class TokenBucket:
                 await asyncio.sleep((tokens - self._tokens) / self.rate)
 
 
+async def _read_capped(response: httpx.Response, limit: int) -> bytes:
+    """Read a response body, refusing more than ``limit`` decoded bytes."""
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in response.aiter_bytes():
+        total += len(chunk)
+        if total > limit:
+            raise RuntimeError(
+                f"response from {response.url.host} exceeded the {limit}-byte limit"
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 async def fetch_json(
     ctx,
     url: str,
@@ -113,36 +135,44 @@ async def fetch_json(
 
     Pass ``follow_redirects=False`` for requests carrying credentials: httpx
     forwards custom headers (and query parameters) across hosts on redirects.
+    Bodies larger than ``max_response_bytes`` are refused before parsing.
     """
+    limit = getattr(ctx.settings, "max_response_bytes", DEFAULT_MAX_RESPONSE_BYTES)
     last_error: Exception | None = None
     for attempt in range(4):
         if bucket is not None:
             await bucket.acquire()
         try:
-            response = await ctx.http.get(
-                url, params=params, headers=headers, follow_redirects=follow_redirects
-            )
+            async with ctx.http.stream(
+                "GET", url, params=params, headers=headers, follow_redirects=follow_redirects
+            ) as response:
+                if follow_redirects is False and response.is_redirect:
+                    raise RuntimeError(f"unexpected redirect from {response.url.host}")
+
+                if response.status_code == 429:
+                    try:
+                        delay = float(response.headers.get("Retry-After", "2"))
+                    except ValueError:
+                        delay = 2**attempt
+                    await asyncio.sleep(min(delay, 60.0))
+                    continue
+                if response.status_code in (500, 502, 503, 504):
+                    await asyncio.sleep(2**attempt)
+                    continue
+
+                response.raise_for_status()
+                body = await _read_capped(response, limit)
+        except httpx.HTTPStatusError:
+            raise  # callers handle status codes without leaking credentials
         except httpx.HTTPError as exc:
             last_error = exc
             await asyncio.sleep(2**attempt)
             continue
 
-        if follow_redirects is False and response.is_redirect:
-            raise RuntimeError(f"unexpected redirect from {response.url.host}")
-
-        if response.status_code == 429:
-            try:
-                delay = float(response.headers.get("Retry-After", "2"))
-            except ValueError:
-                delay = 2**attempt
-            await asyncio.sleep(min(delay, 60.0))
-            continue
-        if response.status_code in (500, 502, 503, 504):
-            await asyncio.sleep(2**attempt)
-            continue
-
-        response.raise_for_status()
-        return response.json()
+        try:
+            return json.loads(body)
+        except ValueError:
+            raise RuntimeError(f"invalid JSON from {url}") from None
 
     # Exception text can contain the full URL (and therefore credentials).
     reason = type(last_error).__name__ if last_error else "no response"

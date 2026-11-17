@@ -1,4 +1,4 @@
-.TH CONIUGATA 1 "2026-11-11" "coniugata 0.1.0" "User Commands"
+.TH CONIUGATA 1 "2026-11-17" "coniugata 0.1.0" "User Commands"
 .SH NAME
 .PP
 coniugata \- modular OSINT aggregation engine
@@ -9,6 +9,10 @@ coniugata [\-\-version] [\-\-help] COMMAND [ARGS]...
 coniugata scan TARGET [OPTIONS]
 
 coniugata modules
+
+coniugata history [\-\-limit N]
+
+coniugata show ID
 
 coniugata manual [SECTION] [\-\-roff]
 .fi
@@ -24,6 +28,10 @@ Sources that need an API key are skipped, with a notice, when the key is not con
 scan TARGET \- run a scan against a domain, IP address, or email.
 .PP
 modules \- list registered sources and what they accept and produce.
+.PP
+history \- list scans recorded in the local history database.
+.PP
+show ID \- show the findings recorded for one scan.
 .PP
 manual [SECTION] \- show this manual. Add \-\-roff to emit a roff man page.
 .PP
@@ -43,6 +51,10 @@ TARGET \- domain, IP address, or email to investigate. Required.
 \-c, \-\-concurrency N \- maximum source tasks in flight at once (default 10).
 .PP
 \-\-cache / \-\-no\-cache \- cache HTTP responses on disk (default: cache).
+.PP
+\-\-db / \-\-no\-db \- record the scan and its findings in the local history database (default: record).
+.PP
+\-\-db\-path PATH \- override the local history database path for this run.
 .PP
 \-v, \-\-verbose \- debug logging, including per\-depth progress.
 .PP
@@ -94,7 +106,7 @@ urlscan.io search: recent scans, URLs, IPs, ASNs (optional API key)
 .fi
 .SH CONFIGURATION
 .PP
-Settings are read from a .env file in the current working directory, then from the environment. Every setting uses the CONIUGATA_ prefix. See .env.example for the complete list.
+Settings are read from a .env file in the current working directory, then from the environment. Every setting uses the CONIUGATA_ prefix. See .env.example for the complete list. A .env that is a symlink, not owned by you, or writable by group/others is ignored so an untrusted repository cannot redirect theHarvester or the database. A .env readable by group/others is loaded with a warning, since it exposes API keys; run chmod 600 .env to fix it. Override the path with CONIUGATA_ENV_FILE.
 .PP
 CONIUGATA_SHODAN_KEY \- Shodan API key. Required by shodan.
 .PP
@@ -112,6 +124,16 @@ CONIUGATA_CACHE_TTL \- cache lifetime in seconds (default 3600).
 .PP
 CONIUGATA_USER_AGENT \- override the default User\-Agent.
 .PP
+CONIUGATA_IDENTITY_MODE \- install (persist one token), run (fresh token each run) or none (no fingerprint). Default: install.
+.PP
+CONIUGATA_INSTANCE_TOKEN \- override the anonymous per\-install token. Normally generated on first run and stored under the config directory.
+.PP
+CONIUGATA_MAX_RESPONSE_BYTES \- refuse HTTP bodies larger than this many decompressed bytes (default 16777216).
+.PP
+CONIUGATA_MAX_ENTITIES \- stop expanding after this many findings per scan; 0 disables the cap (default 50000).
+.PP
+CONIUGATA_DB_PATH \- local history database path (default ~/.local/share/coniugata/coniugata.db).
+.PP
 CONIUGATA_THEHARVESTER_BIN \- theHarvester executable (default theHarvester).
 .PP
 CONIUGATA_THEHARVESTER_SOURCES \- comma\-separated theHarvester sources (default crtsh,otx,hackertarget,rapiddns).
@@ -121,13 +143,28 @@ CONIUGATA_THEHARVESTER_LIMIT \- result limit (default 500).
 CONIUGATA_THEHARVESTER_TIMEOUT \- subprocess timeout in seconds (default 180).
 .PP
 Scan concurrency is controlled by \-\-concurrency, not by an environment variable.
+.SH IDENTITY AND PRIVACY
+.PP
+coniugata ships no author contact details, API keys or shared identifiers. By default it generates a random 128\-bit token in ~/.config/coniugata/instance.json (mode 0600) and puts only a truncated SHA\-256 fingerprint of that token in the User\-Agent. Two installs therefore look different to providers, while neither the token nor the author can be recovered from the header.
+.PP
+CONIUGATA_IDENTITY_MODE selects the behaviour: install keeps one token per install, run generates a fresh token for every run and writes nothing, and none sends no fingerprint at all. An explicit CONIUGATA_INSTANCE_TOKEN overrides all three.
+.PP
+Set CONIUGATA_USER_AGENT to send a different header, or CONIUGATA_INSTANCE_TOKEN to reuse a token across machines. Neither the token nor the fingerprint is a secret, but keep the identity file private: anyone who can read it can impersonate your install.
+.PP
+No telemetry is sent anywhere. Scans are stored only in the local history database, and the HTTP cache stays in the cache directory you configure.
 .SH FILES
 .PP
 \&.env \- local configuration and API keys. Never commit it.
 .PP
 results.json \- default report path, or whatever is passed to \-\-out.
 .PP
+Report files are created with mode 0600 and symlinked report paths are refused, because they can contain personal data.
+.PP
 \&.cache/coniugata/http.db \- HTTP response cache, created with mode 0600. Some providers (notably Shodan) put API keys in query strings, so cached URLs can contain secrets. Treat the cache as sensitive.
+.PP
+~/.config/coniugata/instance.json \- anonymous per\-install token, created with mode 0600 on first use. Only a truncated hash is sent in the User\-Agent.
+.PP
+~/.local/share/coniugata/coniugata.db \- local scan history, created with mode 0600. Disable per run with \-\-no\-db.
 .SH EXAMPLES
 .nf
 # Default scan: all sources, depth 2, JSON report

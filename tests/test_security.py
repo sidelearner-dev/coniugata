@@ -8,6 +8,7 @@ import logging
 import os
 import stat
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
@@ -16,9 +17,9 @@ from pydantic import ValidationError
 from rich.console import Console
 
 import coniugata.report as report_module
-from coniugata.config import Settings
+from coniugata.config import Settings, load_settings
 from coniugata.engine import Context
-from coniugata.http import make_client
+from coniugata.http import fetch_json, make_client
 from coniugata.models import Entity, EntityType
 from coniugata.modules.crtsh import CrtSh
 from coniugata.modules.hibp import HaveIBeenPwned
@@ -333,6 +334,31 @@ def test_markdown_report_escapes_table_and_html_injection(tmp_path):
     assert len([line for line in text.splitlines() if line.startswith("| org")]) == 1
 
 
+@pytest.mark.parametrize("suffix", [".json", ".csv", ".md"])
+def test_report_files_are_private(tmp_path, suffix):
+    path = write_report(
+        [Entity(type=EntityType.ORG, value="Example", source="rdap")],
+        str(tmp_path / f"report{suffix}"),
+    )
+
+    assert Path(path).stat().st_mode & 0o777 == 0o600
+
+
+def test_report_refuses_symlinked_path(tmp_path):
+    victim = tmp_path / "victim.json"
+    victim.write_text("sentinel", encoding="utf-8")
+    link = tmp_path / "report.json"
+    os.symlink(victim, link)
+
+    with pytest.raises(OSError, match="symlinked"):
+        write_report(
+            [Entity(type=EntityType.ORG, value="Example", source="rdap")],
+            str(link),
+        )
+
+    assert victim.read_text(encoding="utf-8") == "sentinel"
+
+
 def test_console_render_strips_terminal_escapes(monkeypatch):
     buffer = io.StringIO()
     monkeypatch.setattr(
@@ -363,11 +389,85 @@ def test_console_render_strips_terminal_escapes(monkeypatch):
         {"theharvester_timeout": 0},
         {"concurrency": 0},
         {"request_timeout": 0},
+        {"max_response_bytes": 1023},
+        {"max_response_bytes": 256 * 1024 * 1024 + 1},
     ],
 )
 def test_settings_reject_unsafe_bounds(kwargs):
     with pytest.raises(ValidationError):
         Settings(**kwargs)
+
+
+def test_unsafe_env_file_is_ignored(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    env.write_text(
+        "CONIUGATA_IDENTITY_MODE=none\n"
+        "CONIUGATA_THEHARVESTER_BIN=/tmp/attacker-binary\n",
+        encoding="utf-8",
+    )
+    env.chmod(0o666)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CONIUGATA_ENV_FILE", raising=False)
+    monkeypatch.delenv("CONIUGATA_IDENTITY_MODE", raising=False)
+    monkeypatch.delenv("CONIUGATA_THEHARVESTER_BIN", raising=False)
+
+    settings = load_settings()
+
+    assert settings.identity_mode == "install"
+    assert settings.theharvester_bin == "theHarvester"
+
+
+def test_private_env_file_is_loaded(tmp_path, monkeypatch):
+    env = tmp_path / ".env"
+    env.write_text("CONIUGATA_IDENTITY_MODE=none\n", encoding="utf-8")
+    env.chmod(0o600)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CONIUGATA_ENV_FILE", raising=False)
+    monkeypatch.delenv("CONIUGATA_IDENTITY_MODE", raising=False)
+
+    assert load_settings().identity_mode == "none"
+
+
+def test_group_readable_env_file_warns(tmp_path, monkeypatch, caplog):
+    env = tmp_path / ".env"
+    env.write_text("CONIUGATA_IDENTITY_MODE=none\n", encoding="utf-8")
+    env.chmod(0o640)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CONIUGATA_ENV_FILE", raising=False)
+    monkeypatch.delenv("CONIUGATA_IDENTITY_MODE", raising=False)
+
+    with caplog.at_level(logging.WARNING, logger="coniugata.config"):
+        assert load_settings().identity_mode == "none"
+
+    assert "chmod 600" in caplog.text
+
+
+def test_symlinked_env_file_is_ignored(tmp_path, monkeypatch):
+    real = tmp_path / "real.env"
+    real.write_text("CONIUGATA_IDENTITY_MODE=none\n", encoding="utf-8")
+    real.chmod(0o600)
+    link = tmp_path / ".env"
+    os.symlink(real, link)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("CONIUGATA_ENV_FILE", raising=False)
+    monkeypatch.delenv("CONIUGATA_IDENTITY_MODE", raising=False)
+
+    assert load_settings().identity_mode == "install"
+
+
+def test_verbose_logging_keeps_secret_bearing_loggers_quiet():
+    from coniugata.cli import NOISY_LOGGERS, _configure_logging
+
+    previous_root = logging.getLogger().level
+    previous = {name: logging.getLogger(name).level for name in NOISY_LOGGERS}
+    try:
+        _configure_logging(True)
+        for name in NOISY_LOGGERS:
+            assert logging.getLogger(name).level == logging.WARNING
+    finally:
+        logging.getLogger().setLevel(previous_root)
+        for name, level in previous.items():
+            logging.getLogger(name).setLevel(level)
 
 
 def test_theharvester_ignores_oversized_report(tmp_path, caplog):
@@ -379,6 +479,22 @@ def test_theharvester_ignores_oversized_report(tmp_path, caplog):
     with caplog.at_level(logging.WARNING):
         assert TheHarvester._load_report(report, "", "", 0, ctx) == {}
     assert "oversized" in caplog.text
+
+
+async def test_fetch_json_refuses_oversized_body():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b"x" * 4096,
+            headers={"content-type": "application/json"},
+        )
+
+    ctx = make_ctx(handler, Settings(max_response_bytes=1024))
+    try:
+        with pytest.raises(RuntimeError, match="exceeded the 1024-byte limit"):
+            await fetch_json(ctx, "https://example.test/big")
+    finally:
+        await ctx.http.aclose()
 
 
 async def test_cache_files_are_private(tmp_path):
