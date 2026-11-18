@@ -138,7 +138,7 @@ def test_cli_history_and_show(tmp_path):
     path = tmp_path / "history.db"
     save_scan(
         _entities(),
-        target="example.com",
+        target="history-target",
         target_type="domain",
         modules=["dns"],
         depth=1,
@@ -148,7 +148,7 @@ def test_cli_history_and_show(tmp_path):
     runner = CliRunner()
     history = runner.invoke(app, ["history", "--db-path", str(path)])
     assert history.exit_code == 0, history.output
-    assert "example.com" in history.output
+    assert "history-target" in history.output
 
     shown = runner.invoke(app, ["show", "1", "--db-path", str(path)])
     assert shown.exit_code == 0, shown.output
@@ -162,7 +162,7 @@ def test_cli_history_uses_env_db_path(tmp_path, monkeypatch):
     path = tmp_path / "history.db"
     save_scan(
         _entities(),
-        target="example.com",
+        target="env-db-target",
         target_type="domain",
         modules=["dns"],
         depth=1,
@@ -173,7 +173,7 @@ def test_cli_history_uses_env_db_path(tmp_path, monkeypatch):
     result = CliRunner().invoke(app, ["history"])
 
     assert result.exit_code == 0, result.output
-    assert "example.com" in result.output
+    assert "env-db-target" in result.output
 
 
 def test_cli_scan_records_history(tmp_path, monkeypatch):
