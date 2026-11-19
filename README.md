@@ -26,23 +26,46 @@ coniugata/
 
 ## Quickstart
 
+From a fresh clone, run one command:
+
 ```bash
-cd ~/Projects/coniugata
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev,cache]"
-
-coniugata modules                       # list sources
-coniugata scan example.com --profile recon
-coniugata scan example.com --depth 2 -o report.md
-
-coniugata --help                        # short overview
-coniugata scan --help                   # summary of scan options
-coniugata manual                        # full manual
-coniugata manual scan                   # one section of the manual
+git clone https://github.com/sidelearner-dev/coniugata.git
+cd coniugata
+./setup.sh
 ```
 
-The first run writes `results.json` and prints a summary table.
+`setup.sh` creates `.venv`, installs the package with caching enabled, and prints
+the commands below. You do not need to activate the environment; call the CLI by
+its full path:
+
+```bash
+./.venv/bin/coniugata scan example.com                  # first scan, JSON report
+./.venv/bin/coniugata scan example.com -p recon -o recon.md
+./.venv/bin/coniugata history                           # scans you have run
+```
+
+Three rules of thumb:
+
+- `-p recon` is the simplest broad scan profile.
+- `-o FILE` chooses `.json`, `.md`, or `.csv` from the extension.
+- Everything else (`--modules`, `--depth`, `--db-path`, keys) is optional; see
+  `coniugata manual`.
+
+No API keys are required: keyed sources are skipped with a notice. `theHarvester`
+is an optional external binary; setup tells you whether it was found. The first
+run writes `results.json` and prints a summary table.
+
+### Manual setup
+
+If you prefer not to use the script:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[cache]"        # add ,dev for tests and linters
+```
+
+Then use `coniugata` instead of `./.venv/bin/coniugata`.
 
 ## Commands
 
@@ -224,6 +247,8 @@ Then add it to `coniugata/modules/__init__.py`. It becomes available to `--modul
 and any profile automatically.
 
 ## Testing
+
+Contributors can install everything with `./setup.sh --dev`. Then:
 
 ```bash
 pytest
