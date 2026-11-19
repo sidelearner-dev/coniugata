@@ -77,6 +77,8 @@ async def run_scan(
     frontier = list(seeds)
     results: list[Entity] = []
     semaphore = asyncio.Semaphore(max(1, ctx.concurrency))
+    limit = getattr(ctx.settings, "max_entities", 0) or None
+    capped = False
 
     async def guarded(mod: Module, entity: Entity) -> list[Entity]:
         async with semaphore:
@@ -103,16 +105,31 @@ async def run_scan(
                 ctx.log.warning("%s", exc)
                 continue
             for item in found:
+                if limit is not None and len(results) >= limit:
+                    ctx.log.warning(
+                        "entity limit (%d) reached; stopping expansion", limit
+                    )
+                    capped = True
+                    break
                 # Keep every occurrence in the report (multi-source provenance) ...
                 results.append(item)
                 # ... but only expand genuinely new entities.
                 if item.key not in seen:
                     seen.add(item.key)
                     discovered.append(item)
+            if capped:
+                break
 
         ctx.log.info(
             "depth %d: %d new entities (%d results)", depth, len(discovered), len(results)
         )
+        if capped:
+            # Stop outstanding requests instead of leaving them running after
+            # the caller closes the HTTP client.
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            break
         frontier = discovered
 
     return results

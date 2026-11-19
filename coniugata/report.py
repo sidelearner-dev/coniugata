@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from pathlib import Path
 
 from rich.console import Console
@@ -75,6 +76,24 @@ def _merge(entities: list[Entity]) -> list[dict]:
     return sorted(merged.values(), key=lambda r: (r["type"], r["value"]))
 
 
+def _open_report(path: Path, *, newline: str | None = None):
+    """Open a report for writing with owner-only permissions.
+
+    Reports contain third-party OSINT data that may be personal, so they must
+    not be world-readable. Symlinked report paths are refused to avoid
+    redirecting the write to a file the user did not intend.
+    """
+    if path.is_symlink():
+        raise OSError(f"refusing symlinked report path: {path}")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+    except OSError:
+        pass
+    return os.fdopen(descriptor, "w", encoding="utf-8", newline=newline)
+
+
 def write_report(entities: list[Entity], path: str) -> str:
     rows = _merge(entities)
     target = Path(path)
@@ -82,7 +101,7 @@ def write_report(entities: list[Entity], path: str) -> str:
     suffix = target.suffix.lower()
 
     if suffix == ".csv":
-        with target.open("w", newline="", encoding="utf-8") as fh:
+        with _open_report(target, newline="") as fh:
             writer = csv.writer(fh)
             writer.writerow(
                 ["type", "value", "sources", "parents", "confidence", "first_seen"]
@@ -109,9 +128,11 @@ def write_report(entities: list[Entity], path: str) -> str:
                 f"{_md_cell(', '.join(row['sources']))} | "
                 f"{_md_cell(', '.join(row['parents'])) or '-'} | {row['confidence']:.2f} |"
             )
-        target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with _open_report(target) as fh:
+            fh.write("\n".join(lines) + "\n")
     else:
-        target.write_text(json.dumps(rows, indent=2) + "\n", encoding="utf-8")
+        with _open_report(target) as fh:
+            fh.write(json.dumps(rows, indent=2) + "\n")
 
     return str(target)
 

@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
+from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 
 import typer
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 
-from .config import Settings
+from . import db
+from .config import Settings, load_settings
 from .engine import Context, build_seeds, run_scan
 from .http import make_client
 from .manual import render_manual, render_roff
@@ -25,6 +29,20 @@ Run [cyan]coniugata manual[/cyan] for the full manual, or [cyan]coniugata scan -
 
 Only scan assets you own or have explicit written authorisation to test.
 """
+
+# Libraries in this list log request lines, query strings and headers at DEBUG
+# level. Shodan puts its key in the query string and HIBP/urlscan use headers,
+# so enabling them in verbose mode would leak credentials to the terminal.
+NOISY_LOGGERS = ("httpx", "httpcore", "hpack", "h2", "hishel")
+
+
+def _configure_logging(verbose: bool) -> None:
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="[%(levelname)s] %(message)s",
+    )
+    for name in NOISY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -154,6 +172,16 @@ def scan(
         "--cache/--no-cache",
         help="Cache HTTP responses on disk. Use --no-cache for fresh data.",
     ),
+    record: bool = typer.Option(
+        True,
+        "--db/--no-db",
+        help="Record this scan in the local history database (default: record).",
+    ),
+    db_path: str | None = typer.Option(
+        None,
+        "--db-path",
+        help="Override the local history database path.",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -167,15 +195,11 @@ def scan(
 
     Run 'coniugata manual scan' for the full reference.
     """
-    logging.basicConfig(
-        level=logging.DEBUG if verbose else logging.INFO,
-        format="[%(levelname)s] %(message)s",
-    )
-    # httpx logs full URLs, which can contain API keys in query strings.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    settings = Settings()
+    _configure_logging(verbose)
+    settings = load_settings()
     selected = _select(modules, profile, settings)
     seeds = build_seeds([target])
+    started_at = datetime.now(UTC)
 
     if not selected:
         console.print("[red]No runnable modules selected.[/red]")
@@ -199,6 +223,148 @@ def scan(
     path = write_report(results, out)
     render(results)
     console.print(f"[green]Report written to[/green] {path}")
+
+    if record:
+        try:
+            scan_id = db.save_scan(
+                results,
+                target=target,
+                target_type=seeds[0].type.value,
+                modules=[module.name for module in selected],
+                depth=depth,
+                profile=profile,
+                started_at=started_at,
+                path=db_path or settings.db_path,
+            )
+        except (OSError, sqlite3.Error) as exc:
+            console.print(f"[yellow]warning[/yellow] scan not recorded: {exc}")
+        else:
+            console.print(f"[green]Scan recorded as[/green] #{scan_id}")
+
+
+HISTORY_EPILOG = """[bold]Examples[/bold]
+
+[cyan]coniugata history[/cyan]
+List the 20 most recent scans.
+
+[cyan]coniugata history -n 100[/cyan]
+List up to 100 scans.
+
+[cyan]coniugata show 3[/cyan]
+Show the findings recorded for scan #3.
+"""
+
+
+def _open_history_error(exc: Exception) -> None:
+    console.print(f"[red]Cannot read history database:[/red] {exc}")
+
+
+def _history_db_path(override: str | None) -> str | None:
+    """Resolve --db-path, then CONIUGATA_DB_PATH from the environment/.env."""
+    return override or load_settings().db_path
+
+
+@app.command("history", epilog=HISTORY_EPILOG)
+def show_history(
+    limit: int = typer.Option(
+        20,
+        "--limit",
+        "-n",
+        min=1,
+        max=500,
+        help="Maximum number of scans to list (default 20).",
+    ),
+    db_path: str | None = typer.Option(
+        None,
+        "--db-path",
+        help="Override the local history database path.",
+    ),
+) -> None:
+    """List scans recorded in the local history database."""
+    try:
+        rows = db.list_scans(limit=limit, path=_history_db_path(db_path))
+    except (OSError, sqlite3.Error) as exc:
+        _open_history_error(exc)
+        raise typer.Exit(code=1) from exc
+
+    if not rows:
+        console.print("[dim]No scans recorded yet.[/dim]")
+        return
+
+    table = Table(title="Scan history")
+    table.add_column("ID", style="cyan", justify="right", no_wrap=True)
+    table.add_column("Target", style="bold")
+    table.add_column("Type", no_wrap=True)
+    table.add_column("Modules")
+    table.add_column("Depth", justify="right")
+    table.add_column("Findings", justify="right")
+    table.add_column("Finished (UTC)")
+    for row in rows:
+        table.add_row(
+            str(row["id"]),
+            Text(row["target"]),
+            Text(row["target_type"]),
+            Text(row["modules"]),
+            str(row["depth"]),
+            str(row["result_count"]),
+            Text(row["finished_at"]),
+        )
+    console.print(table)
+
+
+@app.command("show")
+def show_scan(
+    scan_id: int = typer.Argument(..., help="Scan id shown by 'coniugata history'."),
+    db_path: str | None = typer.Option(
+        None,
+        "--db-path",
+        help="Override the local history database path.",
+    ),
+) -> None:
+    """Show the findings recorded for one scan."""
+    try:
+        found = db.get_scan(scan_id, path=_history_db_path(db_path))
+    except (OSError, sqlite3.Error) as exc:
+        _open_history_error(exc)
+        raise typer.Exit(code=1) from exc
+
+    if found is None:
+        console.print(f"[red]No scan with id[/red] {scan_id}")
+        raise typer.Exit(code=1)
+
+    scan, entities = found
+    console.print(
+        Text.assemble(
+            ("Scan #", "bold"),
+            (str(scan["id"]), "bold"),
+            " ",
+            (scan["target"], "bold"),
+            f" ({scan['target_type']})",
+        )
+    )
+    console.print(
+        Text(
+            f"{scan['modules']} · depth {scan['depth']} · "
+            f"{scan['result_count']} findings · {scan['finished_at']}",
+            style="dim",
+        )
+    )
+
+    table = Table(title=f"Findings for scan #{scan['id']}")
+    table.add_column("Type", style="cyan", no_wrap=True)
+    table.add_column("Value", style="bold")
+    table.add_column("Source", style="green")
+    table.add_column("Parent")
+    table.add_column("Conf", justify="right")
+    for entity in entities:
+        table.add_row(
+            Text(entity["type"]),
+            Text(entity["value"]),
+            Text(entity["source"]),
+            Text(entity["parent"] or "-"),
+            f"{entity['confidence']:.2f}",
+        )
+    console.print(table)
 
 
 MODULES_EPILOG = """[bold]More[/bold]

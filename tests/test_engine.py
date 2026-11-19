@@ -48,3 +48,50 @@ async def test_run_scan_dedupes_expansion_but_keeps_provenance():
     assert len(results) == 2
     assert {item.source for item in results} == {"fake", "other"}
     assert {item.value for item in results} == {"a.example.com"}
+
+
+class BurstSource(Module):
+    name = "burst"
+    accepts = frozenset({EntityType.DOMAIN})
+    produces = frozenset({EntityType.SUBDOMAIN})
+
+    async def run(self, entity, ctx):
+        for index in range(5):
+            yield Entity(
+                type=EntityType.SUBDOMAIN,
+                value=f"h{index}.{entity.value}",
+                source=self.name,
+                parent=entity.value,
+            )
+
+
+async def test_run_scan_respects_entity_cap():
+    ctx = Context(
+        http=httpx.AsyncClient(),
+        settings=Settings(max_entities=2),
+        log=logging.getLogger("test"),
+    )
+    try:
+        results = await run_scan(
+            build_seeds(["example.com"]), [BurstSource()], ctx, max_depth=1
+        )
+    finally:
+        await ctx.http.aclose()
+
+    assert len(results) == 2
+
+
+async def test_run_scan_zero_entity_cap_is_unlimited():
+    ctx = Context(
+        http=httpx.AsyncClient(),
+        settings=Settings(max_entities=0),
+        log=logging.getLogger("test"),
+    )
+    try:
+        results = await run_scan(
+            build_seeds(["example.com"]), [BurstSource()], ctx, max_depth=1
+        )
+    finally:
+        await ctx.http.aclose()
+
+    assert len(results) == 5
